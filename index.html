@@ -174,7 +174,7 @@
 
 <div id="loading">
   <div class="spinner"></div>
-  <span id="loading-text">กำลังจัดวางผนังและเฟอร์นิเจอร์…</span>
+  <span id="loading-text">กำลังโหลดโมเดล 3D…</span>
 </div>
 
 <div id="scene-container"></div>
@@ -206,66 +206,19 @@
 <div class="panel" id="hint">ลากเมาส์/นิ้วเพื่อหมุนกล้องรอบห้อง · pinch หรือสกรอลล์เพื่อซูม</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/loaders/GLTFLoader.js"></script>
 <script>
 (function () {
   "use strict";
 
-  /* ============================================================
-     1. พารามิเตอร์ห้อง (ตรงกับสคริปต์ Blender ต้นฉบับ)
-     ระบบพิกัด Blender ใช้ Z ขึ้น -> แปลงเป็น Three.js (Y ขึ้น)
-     ด้วยฟังก์ชัน b() : (x, y, z)_blender -> (x, z, -y)_three
-     ============================================================ */
-  const ROOM_W = 9.8, ROOM_D = 9.8, ROOM_H = 3.2, WALL_T = 0.1;
-  const X_MIN = -ROOM_W / 2, X_MAX = ROOM_W / 2;
-  const Y_MIN = -ROOM_D / 2, Y_MAX = ROOM_D / 2;
+  /*
+  0. ไฟล์โมเดล — โหลดจาก GLB
+  */
+  const MODEL_URL = "https://rachtapum.github.io/Final3D/Project2.glb";
 
-  const DESK_X = -0.6, DESK_W = 1.8, DESK_D = 0.75, DESK_H = 0.75;
-  const DESK_Y = Y_MAX - DESK_D / 2 - 0.02;
-  const TOP_T = 0.05;
-
-  function b(x, y, z) { return new THREE.Vector3(x, z, -y); }
-
-  // small seeded RNG (mulberry32) เพื่อให้หนังสือ/ใบไม้สุ่มแบบเดิมทุกครั้ง
-  function mulberry32(a) {
-    return function () {
-      a |= 0; a = (a + 0x6D2B79F5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-  const rand = mulberry32(7);
-  const randRange = (lo, hi) => lo + rand() * (hi - lo);
-  const choice = (arr) => arr[Math.floor(rand() * arr.length)];
-
-  /* ============================================================
-     2. วัสดุ (ใกล้เคียงกับ Principled BSDF ในสคริปต์ต้นฉบับ)
-     ============================================================ */
-  const MAT = {
-    floor:      new THREE.MeshStandardMaterial({ color: 0x59381f, roughness: 0.5 }),
-    wall:       new THREE.MeshStandardMaterial({ color: 0xd1cdc3, roughness: 0.9 }),
-    wallAccent: new THREE.MeshStandardMaterial({ color: 0x2e3d4f, roughness: 0.85 }),
-    ceiling:    new THREE.MeshStandardMaterial({ color: 0xededed, roughness: 0.95, side: THREE.DoubleSide }),
-    wood:       new THREE.MeshStandardMaterial({ color: 0x6b4729, roughness: 0.45 }),
-    woodLight:  new THREE.MeshStandardMaterial({ color: 0x9c7247, roughness: 0.5 }),
-    metal:      new THREE.MeshStandardMaterial({ color: 0x8c8e92, roughness: 0.3, metalness: 0.9 }),
-    dark:       new THREE.MeshStandardMaterial({ color: 0x0c0c0f, roughness: 0.5 }),
-    gray:       new THREE.MeshStandardMaterial({ color: 0x3f3f45, roughness: 0.55 }),
-    fabric:     new THREE.MeshStandardMaterial({ color: 0x242833, roughness: 0.95 }),
-    rug:        new THREE.MeshStandardMaterial({ color: 0x733237, roughness: 1.0 }),
-    glass:      new THREE.MeshPhysicalMaterial({ color: 0xd9ebff, roughness: 0.05, transparent: true, opacity: 0.18, side: THREE.DoubleSide }),
-    screen:     new THREE.MeshStandardMaterial({ color: 0x142347, emissive: 0x3f8cff, emissiveIntensity: 1.8, roughness: 0.2 }),
-    rgb:        new THREE.MeshStandardMaterial({ color: 0x991aff, emissive: 0xcc26ff, emissiveIntensity: 1.6, roughness: 0.3 }),
-    lampGlow:   new THREE.MeshStandardMaterial({ color: 0xfff0cc, emissive: 0xffdca6, emissiveIntensity: 2.2, roughness: 0.5 }),
-    leaf:       new THREE.MeshStandardMaterial({ color: 0x1f591f, roughness: 0.8 }),
-    pot:        new THREE.MeshStandardMaterial({ color: 0x9e5a3d, roughness: 0.7 }),
-    poster:     new THREE.MeshStandardMaterial({ color: 0xe69e33, roughness: 0.6 }),
-  };
-  const bookColors = [0xb23333, 0x3366b3, 0xe6b333, 0x408c4d, 0x80409a, 0xd97333];
-
-  /* ============================================================
+  /*
      3. Scene / Camera / Renderer
-     ============================================================ */
+  */
   const container = document.getElementById('scene-container');
   const scene = new THREE.Scene();
   const isDarkMode = () => {
@@ -287,276 +240,101 @@
   if (renderer.outputColorSpace !== undefined) renderer.outputColorSpace = THREE.SRGBColorSpace;
   container.appendChild(renderer.domElement);
 
-  /* ============================================================
-     4. กลุ่มวัตถุ (เทียบเท่า Collection ใน Blender)
-     ============================================================ */
-  const gRoom = new THREE.Group();
-  const gRoof = new THREE.Group();
-  const gDesk = new THREE.Group();
-  const gComputer = new THREE.Group();
-  const gChair = new THREE.Group();
-  const gDecor = new THREE.Group();
-  scene.add(gRoom, gRoof, gDesk, gComputer, gChair, gDecor);
+  /*
+     4. โหลดโมเดล GLB 
+  */
+  let model = null;
+  const roofObjects = []; // เมช/ชิ้นส่วนที่ชื่อเกี่ยวกับ "หลังคา"/"roof" จะถูกเก็บไว้ที่นี่เพื่อสลับเปิด-ปิด
+  const loadingText = document.getElementById('loading-text');
+  const loadingEl = document.getElementById('loading');
 
-  function addBox(group, sx, sy, sz, x, y, z, mat, rotZ) {
-    const geo = new THREE.BoxGeometry(sx, sz, sy);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.copy(b(x, y, z));
-    if (rotZ) mesh.rotation.y = rotZ;
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    group.add(mesh);
-    return mesh;
-  }
-  function addCyl(group, r, depth, x, y, z, mat, axis) {
-    // axis: 'z' (แนวตั้ง, ค่าเริ่มต้น) | 'x' | 'y' — แกนที่ทรงกระบอกวางตัว
-    const geo = new THREE.CylinderGeometry(r, r, depth, 24);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.copy(b(x, y, z));
-    if (axis === 'x') mesh.rotation.z = Math.PI / 2;
-    if (axis === 'y') mesh.rotation.x = Math.PI / 2;
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    group.add(mesh);
-    return mesh;
-  }
-  function addSphere(group, r, x, y, z, mat, sx, sy, sz) {
-    const geo = new THREE.SphereGeometry(r, 20, 14);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.copy(b(x, y, z));
-    mesh.scale.set(sx || 1, sz || 1, sy || 1);
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    group.add(mesh);
-    return mesh;
+  function finishLoading() {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      loadingEl.style.opacity = '0';
+      setTimeout(() => { loadingEl.style.display = 'none'; }, 550);
+    }));
   }
 
-  /* ---------- 4.1 ห้อง: พื้น / ผนัง 4 ด้าน / หน้าต่าง / บัวเชิงผนัง ---------- */
-  addBox(gRoom, ROOM_W, ROOM_D, WALL_T, 0, 0, -WALL_T / 2, MAT.floor);
-  addBox(gRoom, ROOM_W, WALL_T, ROOM_H, 0, Y_MAX + WALL_T / 2, ROOM_H / 2, MAT.wallAccent);
-  addBox(gRoom, ROOM_W, WALL_T, ROOM_H, 0, Y_MIN - WALL_T / 2, ROOM_H / 2, MAT.wall);
-  addBox(gRoom, WALL_T, ROOM_D, ROOM_H, X_MIN - WALL_T / 2, 0, ROOM_H / 2, MAT.wall);
+  const loader = new THREE.GLTFLoader();
+  loader.load(
+    MODEL_URL,
+    (gltf) => {
+      model = gltf.scene;
+     model.traverse((child) => {
+    if (child.isMesh) {
+        
+        const name = (child.name || '').toLowerCase();
 
-  const winZ0 = 0.9, winZ1 = 2.4, winY0 = -1.6, winY1 = 1.6;
-  const xWall = X_MAX + WALL_T / 2;
-  addBox(gRoom, WALL_T, ROOM_D, winZ0, xWall, 0, winZ0 / 2, MAT.wall);
-  addBox(gRoom, WALL_T, ROOM_D, ROOM_H - winZ1, xWall, 0, (ROOM_H + winZ1) / 2, MAT.wall);
-  const sideD = Y_MAX - winY1;
-  addBox(gRoom, WALL_T, sideD, winZ1 - winZ0, xWall, winY1 + sideD / 2, (winZ0 + winZ1) / 2, MAT.wall);
-  addBox(gRoom, WALL_T, sideD, winZ1 - winZ0, xWall, Y_MIN + sideD / 2, (winZ0 + winZ1) / 2, MAT.wall);
-  addBox(gRoom, 0.02, winY1 - winY0, winZ1 - winZ0, X_MAX, 0, (winZ0 + winZ1) / 2, MAT.glass);
-  addBox(gRoom, 0.06, 0.05, winZ1 - winZ0, X_MAX - 0.03, 0, (winZ0 + winZ1) / 2, MAT.dark);
-  addBox(gRoom, 0.06, winY1 - winY0, 0.05, X_MAX - 0.03, 0, (winZ0 + winZ1) / 2, MAT.dark);
-
-  addBox(gRoom, ROOM_W, 0.04, 0.12, 0, Y_MAX - 0.02, 0.06, MAT.wood);
-  addBox(gRoom, ROOM_W, 0.04, 0.12, 0, Y_MIN + 0.02, 0.06, MAT.wood);
-  addBox(gRoom, 0.04, ROOM_D, 0.12, X_MIN + 0.02, 0, 0.06, MAT.wood);
-
-  /* ---------- 4.2 หลังคา (ซ่อนไว้เป็นค่าเริ่มต้น — โจทย์ขอให้เปิดหลังคา) ---------- */
-  const roofMesh = addBox(gRoof, ROOM_W, ROOM_D, WALL_T, 0, 0, ROOM_H + WALL_T / 2, MAT.ceiling);
-  roofMesh.material = roofMesh.material.clone();
-  roofMesh.material.transparent = true;
-  roofMesh.material.opacity = 0.55;
-  gRoof.visible = false; // ปิดหลังคาเป็นค่าเริ่มต้นตามที่ขอ
-
-  /* ---------- 4.3 โต๊ะคอม ---------- */
-  const topZ = DESK_H - TOP_T / 2;
-  addBox(gDesk, DESK_W, DESK_D, TOP_T, DESK_X, DESK_Y, topZ, MAT.woodLight);
-  const legH = DESK_H - TOP_T;
-  [-1, 1].forEach((off) => {
-    const x = DESK_X + off * (DESK_W / 2 - 0.05);
-    addBox(gDesk, 0.04, DESK_D - 0.06, legH, x, DESK_Y, legH / 2, MAT.metal);
-    addBox(gDesk, 0.09, DESK_D, 0.03, x, DESK_Y, 0.015, MAT.metal);
-  });
-  addBox(gDesk, DESK_W - 0.2, 0.05, 0.06, DESK_X, DESK_Y + DESK_D / 2 - 0.08, DESK_H - 0.22, MAT.metal);
-
-  const drawerX = DESK_X + DESK_W / 2 - 0.30;
-  addBox(gDesk, 0.40, DESK_D - 0.12, 0.52, drawerX, DESK_Y, 0.26, MAT.wood);
-  for (let i = 0; i < 2; i++) {
-    const z = 0.14 + i * 0.24;
-    addBox(gDesk, 0.36, 0.02, 0.20, drawerX, DESK_Y - (DESK_D - 0.12) / 2, z, MAT.woodLight);
-    addCyl(gDesk, 0.012, 0.14, drawerX, DESK_Y - (DESK_D - 0.12) / 2 - 0.03, z, MAT.metal, 'y');
-  }
-
-  /* ---------- 4.4 อุปกรณ์คอม ---------- */
-  const top = DESK_H;
-  const monX = DESK_X - 0.15, monY = DESK_Y + 0.22;
-  addCyl(gComputer, 0.13, 0.02, monX, monY, top + 0.01, MAT.dark);
-  addBox(gComputer, 0.05, 0.05, 0.28, monX, monY, top + 0.16, MAT.dark);
-  addBox(gComputer, 0.62, 0.035, 0.38, monX, monY + 0.02, top + 0.42, MAT.dark);
-  addBox(gComputer, 0.58, 0.01, 0.34, monX, monY - 0.008, top + 0.42, MAT.screen);
-
-  addBox(gComputer, 0.85, 0.32, 0.004, DESK_X - 0.05, DESK_Y - 0.18, top + 0.002, MAT.fabric);
-  addBox(gComputer, 0.44, 0.15, 0.022, DESK_X - 0.14, DESK_Y - 0.18, top + 0.015, MAT.dark);
-  addBox(gComputer, 0.44, 0.15, 0.004, DESK_X - 0.14, DESK_Y - 0.18, top + 0.003, MAT.rgb);
-  addSphere(gComputer, 0.045, DESK_X + 0.20, DESK_Y - 0.18, top + 0.018, MAT.dark, 0.75, 1.2, 0.5);
-
-  const caseX = DESK_X - DESK_W / 2 + 0.28;
-  addBox(gComputer, 0.22, 0.46, 0.48, caseX, DESK_Y + 0.05, 0.24, MAT.gray);
-  addBox(gComputer, 0.005, 0.42, 0.42, caseX - 0.11, DESK_Y + 0.05, 0.25, MAT.glass);
-  addBox(gComputer, 0.02, 0.36, 0.02, caseX - 0.08, DESK_Y + 0.05, 0.40, MAT.rgb);
-  for (let i = 0; i < 2; i++) {
-    addCyl(gComputer, 0.055, 0.02, caseX - 0.09, DESK_Y + 0.05, 0.14 + i * 0.13, MAT.rgb, 'x');
-  }
-
-  [-0.72, 0.42].forEach((off) => {
-    addBox(gComputer, 0.09, 0.09, 0.20, DESK_X + off, DESK_Y + 0.26, top + 0.10, MAT.dark);
-  });
-
-  const lampX = DESK_X + DESK_W / 2 - 0.18, lampY = DESK_Y + 0.24;
-  addCyl(gComputer, 0.09, 0.02, lampX, lampY, top + 0.01, MAT.metal);
-  addCyl(gComputer, 0.012, 0.42, lampX, lampY, top + 0.22, MAT.metal);
-  addCyl(gComputer, 0.012, 0.26, lampX - 0.12, lampY, top + 0.42, MAT.metal, 'y');
-  addCyl(gComputer, 0.07, 0.10, lampX - 0.24, lampY, top + 0.40, MAT.metal);
-  addCyl(gComputer, 0.05, 0.01, lampX - 0.24, lampY, top + 0.35, MAT.lampGlow);
-
-  addCyl(gComputer, 0.04, 0.10, DESK_X + 0.42, DESK_Y + 0.10, top + 0.05, MAT.poster);
-  addBox(gComputer, 0.21, 0.29, 0.02, DESK_X - 0.62, DESK_Y - 0.10, top + 0.01, MAT.fabric, THREE.MathUtils.degToRad(12));
-
-  /* ---------- 4.5 เก้าอี้ ---------- */
-  const cx = DESK_X - 0.1, cy = DESK_Y - 0.95;
-  addBox(gChair, 0.50, 0.48, 0.09, cx, cy, 0.46, MAT.fabric);
-  addBox(gChair, 0.48, 0.09, 0.56, cx, cy + 0.24, 0.78, MAT.fabric, 0);
-  [-0.27, 0.27].forEach((off) => {
-    addBox(gChair, 0.05, 0.34, 0.05, cx + off, cy, 0.64, MAT.dark);
-    addBox(gChair, 0.04, 0.04, 0.16, cx + off, cy + 0.10, 0.55, MAT.dark);
-  });
-  addCyl(gChair, 0.035, 0.36, cx, cy, 0.24, MAT.metal);
-  for (let i = 0; i < 5; i++) {
-    const ang = i * (2 * Math.PI / 5);
-    const lx = cx + Math.cos(ang) * 0.17, ly = cy + Math.sin(ang) * 0.17;
-    addBox(gChair, 0.30, 0.05, 0.035, lx, ly, 0.075, MAT.dark, ang);
-    const wx = cx + Math.cos(ang) * 0.30, wy = cy + Math.sin(ang) * 0.30;
-    addCyl(gChair, 0.035, 0.025, wx, wy, 0.035, MAT.dark, 'y');
-  }
-
-  /* ---------- 4.6 ของตกแต่ง ---------- */
-  addBox(gDecor, 2.6, 2.0, 0.012, DESK_X, DESK_Y - 1.6, 0.006, MAT.rug);
-
-  // ชั้นหนังสือ
-  const sx = X_MIN + 0.22, sy = 0.5;
-  const shelfH = 1.8, shelfW = 0.9, shelfD = 0.32;
-  addBox(gDecor, 0.03, shelfD, shelfH, sx, sy - shelfW / 2, shelfH / 2, MAT.wood);
-  addBox(gDecor, 0.03, shelfD, shelfH, sx, sy + shelfW / 2, shelfH / 2, MAT.wood);
-  addBox(gDecor, 0.02, shelfW, shelfH, sx - 0.15, sy, shelfH / 2, MAT.wood);
-  for (let level = 0; level < 4; level++) {
-    const z = 0.12 + level * 0.45;
-    addBox(gDecor, shelfD, shelfW, 0.03, sx, sy, z, MAT.wood);
-    if (level === 3) continue;
-    let y = sy - shelfW / 2 + 0.06;
-    while (y < sy + shelfW / 2 - 0.08) {
-      const t = randRange(0.025, 0.05);
-      const h = randRange(0.22, 0.32);
-      const mat = new THREE.MeshStandardMaterial({ color: choice(bookColors), roughness: 0.75 });
-      addBox(gDecor, 0.20, t, h, sx + 0.02, y + t / 2, z + 0.015 + h / 2, mat);
-      y += t + randRange(0.004, 0.02);
+        if (
+    name.includes('roof') ||
+    name.includes('หลังคา') ||
+    name.includes('ceiling')
+) {
+            roofObjects.push(child);
+            child.visible = false;
+        }
     }
-  }
-  addBox(gDecor, 0.18, 0.22, 0.14, sx, sy - 0.22, 1.54, MAT.poster);
-  addSphere(gDecor, 0.08, sx, sy + 0.20, 1.55, MAT.rgb);
+});
+      scene.add(model);
 
-  // ต้นไม้
-  const px = X_MIN + 0.45, py = Y_MAX - 0.45;
-  addCyl(gDecor, 0.18, 0.30, px, py, 0.15, MAT.pot);
-  addCyl(gDecor, 0.165, 0.02, px, py, 0.30, MAT.dark);
-  addCyl(gDecor, 0.025, 0.55, px, py, 0.55, MAT.leaf);
-  for (let i = 0; i < 7; i++) {
-    const ang = i * (2 * Math.PI / 7) + randRange(-0.2, 0.2);
-    const r = randRange(0.14, 0.26);
-    const lx = px + Math.cos(ang) * r, ly = py + Math.sin(ang) * r;
-    const lz = 0.70 + randRange(0.0, 0.35);
-    const leaf = addSphere(gDecor, 0.16, lx, ly, lz, MAT.leaf, 1.0, 0.55, 0.22);
-    leaf.rotation.z = ang;
-    leaf.rotation.x = THREE.MathUtils.degToRad(randRange(-25, 25));
-  }
+      // จัดกล้องให้พอดีกับขนาดของโมเดลที่โหลดมาโดยอัตโนมัติ
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      target.copy(center);
+      const maxDim = Math.max(size.x, size.y, size.z) || 6;
+      radius = maxDim * 1.6;
+      minRadius = maxDim * 0.25;
+      maxRadius = maxDim * 6;
+      camera.far = Math.max(200, maxDim * 12);
+      camera.updateProjectionMatrix();
+      defaultView.theta = theta; defaultView.phi = phi; defaultView.radius = radius;
+      updateCamera();
 
-  // โปสเตอร์
-  [
-    [0.55, 0.75, DESK_X - 0.95, 1.85, 0xe69e33],
-    [0.45, 0.60, DESK_X + 0.62, 1.95, 0x408cbf],
-    [0.40, 0.40, DESK_X + 1.15, 1.55, 0xbf4d73],
-  ].forEach(([w, h, x, z, col]) => {
-    addBox(gDecor, w + 0.04, 0.02, h + 0.04, x, Y_MAX - 0.015, z, MAT.dark);
-    addBox(gDecor, w, 0.01, h, x, Y_MAX - 0.03, z, new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 }));
-  });
+      finishLoading();
+    },
+    (xhr) => {
+      if (xhr.total) {
+        const pct = Math.round((xhr.loaded / xhr.total) * 100);
+        loadingText.textContent = `กำลังโหลดโมเดล 3D… ${pct}%`;
+      }
+    },
+    (err) => {
+      console.error('โหลดโมเดล ' + MODEL_URL + ' ไม่สำเร็จ', err);
+      loadingText.textContent = 'โหลดโมเดลไม่สำเร็จ ตรวจสอบลิงก์ไฟล์ .glb';
+    }
+  );
 
-  // นาฬิกา
-  const clockY = DESK_Y - 2.4;
-  addCyl(gDecor, 0.16, 0.04, X_MIN + 0.06, clockY, 2.2, MAT.dark, 'x');
-  addCyl(gDecor, 0.14, 0.01, X_MIN + 0.09, clockY, 2.2, MAT.ceiling, 'x');
-
-  // ผ้าม่าน
-  [-1.85, 1.85].forEach((y) => {
-    addBox(gDecor, 0.05, 0.45, 1.85, X_MAX - 0.08, y, 1.62, MAT.fabric);
-  });
-  addCyl(gDecor, 0.02, 4.4, X_MAX - 0.08, 0, 2.58, MAT.metal, 'y');
-
-  // โคมไฟเพดาน (โคมแขวนยังอยู่ แม้ไม่มีหลังคาก็แขวนจากจุดเดิมได้)
-  const CEILING_LAMPS = [[-2.2, 1.6], [2.0, -1.8]];
-  CEILING_LAMPS.forEach(([lx, ly]) => {
-    addCyl(gDecor, 0.015, 0.30, lx, ly, ROOM_H - 0.15, MAT.metal);
-    addCyl(gDecor, 0.28, 0.16, lx, ly, ROOM_H - 0.38, MAT.ceiling);
-    addCyl(gDecor, 0.22, 0.02, lx, ly, ROOM_H - 0.46, MAT.lampGlow);
-  });
-
-  // ถังขยะ
-  addCyl(gDecor, 0.13, 0.30, DESK_X + DESK_W / 2 + 0.25, DESK_Y, 0.15, MAT.gray);
-
-  // มุมนั่งเล่น: โซฟา + โต๊ะกลาง + โคมไฟตั้งพื้น
-  const fx = 1.6, fy = Y_MIN + 1.5;
-  addBox(gDecor, 2.0, 0.85, 0.32, fx, fy, 0.22, MAT.fabric);
-  addBox(gDecor, 2.0, 0.22, 0.55, fx, fy - 0.32, 0.60, MAT.fabric);
-  [-0.9, 0.9].forEach((off) => addBox(gDecor, 0.20, 0.85, 0.28, fx + off, fy, 0.52, MAT.fabric));
-  [-0.42, 0.42].forEach((off) => addBox(gDecor, 0.78, 0.72, 0.14, fx + off, fy + 0.04, 0.45, MAT.fabric));
-  [[-0.55, 0xd98c40], [0.55, 0x4d8099]].forEach(([off, col]) => {
-    const pil = new THREE.MeshStandardMaterial({ color: col, roughness: 0.9 });
-    addBox(gDecor, 0.34, 0.12, 0.34, fx + off, fy - 0.16, 0.70, pil, 0)
-      .rotation.x = THREE.MathUtils.degToRad(-10);
-  });
-  addBox(gDecor, 1.1, 0.55, 0.05, fx, fy + 0.95, 0.40, MAT.woodLight);
-  [[-0.48, -0.20], [0.48, -0.20], [-0.48, 0.20], [0.48, 0.20]].forEach(([ox, oy]) => {
-    addCyl(gDecor, 0.025, 0.38, fx + ox, fy + 0.95 + oy, 0.19, MAT.metal);
-  });
-  const flx = fx + 1.35, fly = fy - 0.2;
-  addCyl(gDecor, 0.20, 0.03, flx, fly, 0.015, MAT.metal);
-  addCyl(gDecor, 0.02, 1.55, flx, fly, 0.80, MAT.metal);
-  addCyl(gDecor, 0.22, 0.28, flx, fly, 1.65, MAT.ceiling);
-  addCyl(gDecor, 0.17, 0.02, flx, fly, 1.53, MAT.lampGlow);
-
-  /* ============================================================
-     5. แสง (เทียบเท่าชุดไฟในสคริปต์ Blender)
-     ============================================================ */
-  const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+  /*
+     5. แสง
+  */
+  const ambient = new THREE.AmbientLight(0xffffff, 0.55);
   scene.add(ambient);
 
-  CEILING_LAMPS.forEach(([lx, ly]) => {
-    const pl = new THREE.PointLight(0xfff2d6, 1.1, 9, 2);
-    pl.position.copy(b(lx, ly, ROOM_H - 0.5));
-    pl.castShadow = true;
-    scene.add(pl);
-  });
+  const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x3a3a3a, 0.5);
+  scene.add(hemi);
 
-  const winLight = new THREE.DirectionalLight(0xbfd9ff, 1.0);
-  winLight.position.copy(b(X_MAX + 2.5, 0, 1.8));
-  winLight.target.position.copy(b(0, 0, 1.2));
-  winLight.castShadow = true;
-  winLight.shadow.mapSize.set(1024, 1024);
-  winLight.shadow.camera.left = -6; winLight.shadow.camera.right = 6;
-  winLight.shadow.camera.top = 6; winLight.shadow.camera.bottom = -6;
-  scene.add(winLight, winLight.target);
+  const keyLight = new THREE.DirectionalLight(0xfff2d6, 1.2);
+  keyLight.position.set(6, 10, 6);
+  keyLight.castShadow = true;
+  keyLight.shadow.mapSize.set(2048, 2048);
+  keyLight.shadow.camera.left = -10; keyLight.shadow.camera.right = 10;
+  keyLight.shadow.camera.top = 10; keyLight.shadow.camera.bottom = -10;
+  keyLight.shadow.camera.far = 40;
+  scene.add(keyLight, keyLight.target);
 
-  const deskFill = new THREE.PointLight(0xffe6cc, 0.7, 4, 2);
-  deskFill.position.copy(b(DESK_X, DESK_Y - 0.6, 2.6));
-  scene.add(deskFill);
+  const fillLight = new THREE.DirectionalLight(0xbfd9ff, 0.5);
+  fillLight.position.set(-6, 5, -4);
+  scene.add(fillLight);
 
-  const floorLampLight = new THREE.PointLight(0xffd199, 0.6, 3.5, 2);
-  floorLampLight.position.copy(b(flx, fly, 1.55));
-  scene.add(floorLampLight);
-
-  /* ============================================================
-     6. กล้อง + Orbit control (เขียนเอง ไม่พึ่ง OrbitControls.js)
-     ============================================================ */
-  const target = b(0, -0.3, 1.1);
+  /*
+     6. กล้อง + Orbit control
+  */
+  const target = new THREE.Vector3(0, 1, 0); // จะถูกอัปเดตให้ตรงกับกึ่งกลางโมเดลหลังโหลดเสร็จ
   let radius = 9.5, theta = Math.PI * 0.28, phi = Math.PI * 0.36; // ทรงกลม: theta=รอบแกนตั้ง, phi=มุมก้ม
   const minPhi = 0.12, maxPhi = Math.PI / 2 - 0.02;
-  const minRadius = 2.5, maxRadius = 20;
+  let minRadius = 2.5, maxRadius = 20;
+  const defaultView = { theta, phi, radius };
 
   function updateCamera() {
     const sinPhi = Math.sin(phi);
@@ -611,18 +389,20 @@
     updateCamera();
   }, { passive: false });
 
-  /* ============================================================
+  /*
      7. UI: ปุ่มควบคุม
-     ============================================================ */
+  */
   const roofToggle = document.getElementById('roofToggle');
-  roofToggle.addEventListener('change', () => { gRoof.visible = roofToggle.checked; });
+  roofToggle.addEventListener('change', () => {
+    roofObjects.forEach((obj) => { obj.visible = roofToggle.checked; });
+  });
 
   const topToggle = document.getElementById('topToggle');
   let savedTheta = theta, savedPhi = phi, savedRadius = radius;
   topToggle.addEventListener('change', () => {
     if (topToggle.checked) {
       savedTheta = theta; savedPhi = phi; savedRadius = radius;
-      theta = Math.PI * 0.25; phi = 0.15; radius = 12;
+      theta = Math.PI * 0.25; phi = 0.15; radius = defaultView.radius * 1.25;
     } else {
       theta = savedTheta; phi = savedPhi; radius = savedRadius;
     }
@@ -630,14 +410,14 @@
   });
 
   document.getElementById('resetBtn').addEventListener('click', () => {
-    theta = Math.PI * 0.28; phi = Math.PI * 0.36; radius = 9.5;
+    theta = defaultView.theta; phi = defaultView.phi; radius = defaultView.radius;
     topToggle.checked = false;
     updateCamera();
   });
 
-  /* ============================================================
+  /*
      8. Resize / loop / loading overlay
-     ============================================================ */
+  */
   function onResize() {
     camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
@@ -650,12 +430,7 @@
     renderer.render(scene, camera);
   }
   animate();
-
-  const loadingEl = document.getElementById('loading');
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    loadingEl.style.opacity = '0';
-    setTimeout(() => { loadingEl.style.display = 'none'; }, 550);
-  }));
+  // หมายเหตุ: หน้าจอ "กำลังโหลด" จะถูกซ่อนโดย finishLoading() หลังโมเดล GLB โหลดเสร็จ 
 
   const hint = document.getElementById('hint');
   setTimeout(() => { hint.style.opacity = '0'; }, 6000);
