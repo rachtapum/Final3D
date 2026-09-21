@@ -302,7 +302,7 @@
     const geo = new THREE.BoxGeometry(sx, sz, sy);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(b(x, y, z));
-    if (rotZ) mesh.rotation.y = -rotZ;
+    if (rotZ) mesh.rotation.y = rotZ;
     mesh.castShadow = true; mesh.receiveShadow = true;
     group.add(mesh);
     return mesh;
